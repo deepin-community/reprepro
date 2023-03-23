@@ -1,0 +1,205 @@
+From 07e604498ba1ef3ec1fdc4132f6fa468ffbd47b9 Mon Sep 17 00:00:00 2001
+From: hudeng <hudeng@deepin.org>
+Date: Thu, 23 Mar 2023 11:15:49 +0800
+Subject: [PATCH] feat: repo update add obs repository support
+
+---
+ remoterepository.c | 78 ++++++++++++++++++++++++++++++++--------------
+ remoterepository.h |  2 +-
+ updates.c          |  7 ++++-
+ 3 files changed, 62 insertions(+), 25 deletions(-)
+
+diff --git a/remoterepository.c b/remoterepository.c
+index ec1d726..0cca846 100644
+--- a/remoterepository.c
++++ b/remoterepository.c
+@@ -113,6 +113,9 @@ struct remote_distribution {
+ 
+ 	/* InRelease failed or requested not to be used */
+ 	bool noinrelease;
++
++	/* Distribution type, default is debian */
++	char *type;
+ };
+ 
+ struct remote_index {
+@@ -184,6 +187,8 @@ static void remote_distribution_free(/*@only@*/struct remote_distribution *d) {
+ 	if (d == NULL)
+ 		return;
+ 	free(d->suite);
++	if (d->type)
++		free(d->type);
+ 	signature_requirements_free(d->verify);
+ 	free(d->inreleasefile);
+ 	free(d->releasefile);
+@@ -502,7 +507,7 @@ void cachedlistfile_need(struct cachedlistfile *list, const char *type, unsigned
+ 	}
+ }
+ 
+-retvalue remote_distribution_prepare(struct remote_repository *repository, const char *suite, bool ignorerelease, bool getinrelease, const char *verifyrelease, bool flat, bool *ignorehashes, struct remote_distribution **out_p) {
++retvalue remote_distribution_prepare(struct remote_repository *repository, const char *updatetype, const char *suite, bool ignorerelease, bool getinrelease, const char *verifyrelease, bool flat, bool *ignorehashes, struct remote_distribution **out_p) {
+ 	struct remote_distribution *n, **last;
+ 	enum checksumtype cs;
+ 
+@@ -573,6 +578,8 @@ retvalue remote_distribution_prepare(struct remote_repository *repository, const
+ 			if (RET_WAS_ERROR(r))
+ 				return r;
+ 		}
++		if (updatetype && strcmp(updatetype, "obs") == 0)
++			n->type = strdup("obs");
+ 		*out_p = n;
+ 		return RET_OK;
+ 	}
+@@ -597,6 +604,8 @@ retvalue remote_distribution_prepare(struct remote_repository *repository, const
+ 	n->flat = flat;
+ 	if (flat)
+ 		n->suite_base_dir = strdup(suite);
++	else if (updatetype && strcmp(updatetype, "obs") == 0)
++		n->suite_base_dir = strdup(".");
+ 	else
+ 		n->suite_base_dir = calc_dirconcat("dists", suite);
+ 	if (FAILEDTOALLOC(n->suite) ||
+@@ -632,6 +641,8 @@ retvalue remote_distribution_prepare(struct remote_repository *repository, const
+ 		remote_distribution_free(n);
+ 		return RET_ERROR_OOM;
+ 	}
++	if (updatetype && strcmp(updatetype, "obs") == 0)
++		n->type = strdup("obs");
+ 	*last = n;
+ 	*out_p = n;
+ 	return RET_OK;
+@@ -1528,29 +1539,50 @@ struct remote_index *remote_index(struct remote_distribution *rd, const char *ar
+ 	char *cachefilename, *filename_in_release;
+ 
+ 	assert (!rd->flat);
+-	if (packagetype == pt_deb) {
+-		filename_in_release = mprintf(
+-"%s/binary-%s/Packages",
+-				component, architecture);
+-		cachefilename = genlistsfilename("Packages", 4,
+-				rd->repository->name, rd->suite,
+-				component, architecture, ENDOFARGUMENTS);
+-	} else if (packagetype == pt_udeb) {
+-		filename_in_release = mprintf(
+-"%s/debian-installer/binary-%s/Packages",
+-				component, architecture);
+-		cachefilename = genlistsfilename("uPackages", 4,
+-				rd->repository->name, rd->suite,
+-				component, architecture, ENDOFARGUMENTS);
+-	} else if (packagetype == pt_dsc) {
+-		filename_in_release = mprintf(
+-"%s/source/Sources",
+-				component);
+-		cachefilename = genlistsfilename("Sources", 3,
+-				rd->repository->name, rd->suite,
+-				component, ENDOFARGUMENTS);
++	if (rd->type && strcmp(rd->type, "obs") == 0) {
++		if (packagetype == pt_deb) {
++			filename_in_release = strdup("Packages");
++			cachefilename = genlistsfilename("Packages", 4,
++					rd->repository->name, rd->suite,
++					component, architecture, ENDOFARGUMENTS);
++		} else if (packagetype == pt_udeb) {
++			filename_in_release = strdup("debian-installer/Packages");
++			cachefilename = genlistsfilename("uPackages", 4,
++					rd->repository->name, rd->suite,
++					component, architecture, ENDOFARGUMENTS);
++		} else if (packagetype == pt_dsc) {
++			filename_in_release = strdup("Sources");
++			cachefilename = genlistsfilename("Sources", 3,
++					rd->repository->name, rd->suite,
++					component, ENDOFARGUMENTS);
++		} else {
++			assert ("Unexpected package type" == NULL);
++		}
+ 	} else {
+-		assert ("Unexpected package type" == NULL);
++		if (packagetype == pt_deb) {
++			filename_in_release = mprintf(
++	"%s/binary-%s/Packages",
++					component, architecture);
++			cachefilename = genlistsfilename("Packages", 4,
++					rd->repository->name, rd->suite,
++					component, architecture, ENDOFARGUMENTS);
++		} else if (packagetype == pt_udeb) {
++			filename_in_release = mprintf(
++	"%s/debian-installer/binary-%s/Packages",
++					component, architecture);
++			cachefilename = genlistsfilename("uPackages", 4,
++					rd->repository->name, rd->suite,
++					component, architecture, ENDOFARGUMENTS);
++		} else if (packagetype == pt_dsc) {
++			filename_in_release = mprintf(
++	"%s/source/Sources",
++					component);
++			cachefilename = genlistsfilename("Sources", 3,
++					rd->repository->name, rd->suite,
++					component, ENDOFARGUMENTS);
++		} else {
++			assert ("Unexpected package type" == NULL);
++		}
+ 	}
+ 	return addindex(rd, cachefilename, filename_in_release, downloadas);
+ }
+diff --git a/remoterepository.h b/remoterepository.h
+index badfa3d..b12811e 100644
+--- a/remoterepository.h
++++ b/remoterepository.h
+@@ -23,7 +23,7 @@ struct remote_index;
+ struct remote_repository *remote_repository_prepare(const char * /*name*/, const char * /*method*/, const char * /*fallback*/, const struct strlist * /*config*/);
+ 
+ /* register remote distribution of the given repository */
+-retvalue remote_distribution_prepare(struct remote_repository *, const char * /*suite*/, bool /*ignorerelease*/, bool /*getinrelease*/, const char * /*verifyrelease*/, bool /*flat*/, bool * /*ignorehashes*/, /*@out@*/struct remote_distribution **);
++retvalue remote_distribution_prepare(struct remote_repository *, const char * /*type*/, const char * /*suite*/, bool /*ignorerelease*/, bool /*getinrelease*/, const char * /*verifyrelease*/, bool /*flat*/, bool * /*ignorehashes*/, /*@out@*/struct remote_distribution **);
+ 
+ void remote_repository_free(/*@only@*/struct remote_repository *);
+ 
+diff --git a/updates.c b/updates.c
+index 8d81ddf..9a13457 100644
+--- a/updates.c
++++ b/updates.c
+@@ -131,6 +131,8 @@ struct update_pattern {
+ 	struct update_pattern *next;
+ 	//e.g. "Name: woody"
+ 	char *name;
++	/* update type */
++	char *type;
+ 	/* another pattern to take value from */
+ 	char *from;
+ 	/*@dependent@*/struct update_pattern *pattern_from;
+@@ -254,6 +256,7 @@ static void update_pattern_free(/*@only@*/struct update_pattern *update) {
+ 	if (update == NULL)
+ 		return;
+ 	free(update->name);
++	free(update->type);
+ 	free(update->from);
+ 	free(update->method);
+ 	free(update->fallback);
+@@ -350,6 +353,7 @@ static inline retvalue newupdatetarget(struct update_target **ts, /*@dependent@*
+ 
+ CFlinkedlistinit(update_pattern)
+ CFvalueSETPROC(update_pattern, name)
++CFvalueSETPROC(update_pattern, type)
+ CFvalueSETPROC(update_pattern, suite_from)
+ CFatomSETPROC(update_pattern, flat, at_component)
+ CFvalueSETPROC(update_pattern, from)
+@@ -526,6 +530,7 @@ CFhashesSETPROC(update_pattern, ignorehashes);
+ 
+ static const struct configfield updateconfigfields[] = {
+ 	CFr("Name", update_pattern, name),
++	CF("Type", update_pattern, type),
+ 	CF("From", update_pattern, from),
+ 	CF("Method", update_pattern, method),
+ 	CF("Fallback", update_pattern, fallback),
+@@ -877,7 +882,7 @@ static retvalue instance_pattern(struct update_pattern *pattern, const struct di
+ 		return RET_ERROR;
+ 	}
+ 	r = remote_distribution_prepare(declaration->repository,
+-			update->suite_from, ignorerelease,
++			pattern->type, update->suite_from, ignorerelease,
+ 			getinrelease, verifyrelease, update->flat,
+ 			ignorehashes, &update->from);
+ 	if (RET_WAS_ERROR(r)) {
+-- 
+2.20.1
+

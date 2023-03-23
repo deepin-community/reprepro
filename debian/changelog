@@ -1,3 +1,11 @@
+reprepro (5.4.2-1deepin1) unstable; urgency=medium
+
+  [ hudeng ]
+  * fix: workflow files deleted
+  * fix: test error
+
+ -- Deepin Packages Builder <packages@deepin.org>  Thu, 23 Mar 2023 11:20:00 +0800
+
 reprepro (5.4.2-1) experimental; urgency=medium
 
   * Import new upstream version 5.4.2 (LP: #2008508)
