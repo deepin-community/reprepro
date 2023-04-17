@@ -1,8 +1,9 @@
-reprepro (5.4.2-1deepin1) unstable; urgency=medium
+reprepro (5.4.2-1deepin2) unstable; urgency=medium
 
   [ hudeng ]
   * fix: workflow files deleted
   * fix: test error
+  * feat: add ignore source checksum option support
 
  -- Deepin Packages Builder <packages@deepin.org>  Thu, 23 Mar 2023 11:20:00 +0800
 

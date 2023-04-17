@@ -1,0 +1,136 @@
+From c4832187777cc08e45b59ffe74cb240949326d06 Mon Sep 17 00:00:00 2001
+From: hudeng <hudeng@deepin.org>
+Date: Mon, 17 Apr 2023 15:07:48 +0800
+Subject: [PATCH] feat: add ignore source checksum option support
+
+---
+ downloadcache.c | 26 ++++++++++++++++-------
+ files.c         |  4 ++--
+ upgradelist.c   | 55 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 76 insertions(+), 9 deletions(-)
+
+Index: reprepro/downloadcache.c
+===================================================================
+--- reprepro.orig/downloadcache.c
++++ reprepro/downloadcache.c
+@@ -126,13 +126,25 @@ static retvalue downloaditem_callback(en
+ 	assert (checksums != NULL);
+ 
+ 	if (!checksums_check(d->checksums, checksums, &improves)) {
+-		fprintf(stderr, "Wrong checksum during receive of '%s':\n",
+-				uri);
+-		checksums_printdifferences(stderr, d->checksums, checksums);
+-		checksums_free(read_checksums);
+-		(void)unlink(wantedfilename);
+-		// TODO: instead store in downloaditem?
+-		return RET_ERROR_WRONG_MD5;
++		// only source file can ignore checksums
++		size_t l = strlen(gotfilename);
++		if (getenv("IGNORECHECKSUM")!=NULL && l > 4 && strcmp(gotfilename+l-3, "deb") != 0) {
++			// modify check
++			fprintf(stdout, "Skip wrong checksum during receive source file of '%s', %s, %s:\n",
++					uri, gotfilename, wantedfilename);
++			checksums_printdifferences(stdout, d->checksums, checksums);
++			// update file real checksums
++			checksums_free(d->checksums);
++			d->checksums = checksums_dup(checksums);
++		} else {
++			fprintf(stderr, "Wrong checksum during receive of '%s':\n",
++					uri);
++			checksums_printdifferences(stderr, d->checksums, checksums);
++			checksums_free(read_checksums);
++			(void)unlink(wantedfilename);
++			// TODO: instead store in downloaditem?
++			return RET_ERROR_WRONG_MD5;
++		}
+ 	}
+ 	if (improves) {
+ 		r = checksums_combine(&d->checksums, checksums, NULL);
+Index: reprepro/files.c
+===================================================================
+--- reprepro.orig/files.c
++++ reprepro/files.c
+@@ -136,8 +136,8 @@ retvalue files_canadd(const char *fileke
+ "File \"%s\" is already registered with different checksums!\n",
+ 				filekey);
+ 		checksums_printdifferences(stderr, indatabase, checksums);
+-		checksums_free(indatabase);
+-		return RET_ERROR_WRONG_MD5;
++		// checksums_free(indatabase);
++		// return RET_ERROR_WRONG_MD5;
+ 
+ 	}
+ 	// TODO: sometimes the caller might want to have additional
+Index: reprepro/upgradelist.c
+===================================================================
+--- reprepro.orig/upgradelist.c
++++ reprepro/upgradelist.c
+@@ -30,6 +30,9 @@
+ #include "descriptions.h"
+ #include "package.h"
+ #include "upgradelist.h"
++#include "mprintf.h"
++#include "dirs.h"
++#include <libgen.h>
+ 
+ struct package_data {
+ 	struct package_data *next;
+@@ -679,6 +682,58 @@ retvalue upgradelist_install(struct upgr
+ 
+ 			r = files_checkorimprove(&pkg->new_filekeys,
+ 					pkg->new_origfiles.checksums);
++			// reload dsc files
++			if (getenv("IGNORECHECKSUM")!=NULL && r == RET_ERROR_WRONG_MD5 && pkg->architecture == architecture_source) {
++				struct strlist *filekeys = &pkg->new_filekeys;
++				char *tmp_basedir = mprintf("./dscreload/%s", pkg->name);
++				dirs_make_recursive(tmp_basedir);
++				char *dscname = NULL;
++				for (int i = 0; i < filekeys->count; i++) {
++					char *fullfilename, filename, tmpfile;
++					fullfilename = files_calcfullfilename(filekeys->values[i]);
++					size_t l = strlen(fullfilename);
++					//fprintf(stdout, "fullfilename: %s \n", fullfilename);
++					if (l > 4 && strcmp(fullfilename+l-4, ".dsc") == 0) {
++						dscname = strdup(fullfilename);
++						break;
++					}
++				}
++
++				char *cmdstr = mprintf("cd %s;dpkg-source -x --skip-patches --no-check ../../%s;find . -maxdepth 1 -type d ! -path . |xargs dpkg-source -b;cd -",
++										tmp_basedir, dscname);
++
++				//fprintf(stdout, "vars: %s %s %s\n", dscname, tmp_basedir, cmdstr);
++				if (dscname != NULL) {
++					free(dscname);
++				}
++				int cmdret = system(cmdstr);
++				if (cmdret != -1) {
++					bool reloadstatus = true;
++					for (int j = 0; j < filekeys->count; j++) {
++						char *fullfilename, *filename, *tmpfile;
++						fullfilename = files_calcfullfilename(filekeys->values[j]);
++						filename = basename(fullfilename);
++						tmpfile = mprintf("%s/%s", tmp_basedir, filename);
++						struct checksums *cs = NULL;
++						retvalue ret = checksums_copyfile(fullfilename, tmpfile, true, &cs);
++						//fprintf(stdout, "checksums_copyfile ret: %d\n", ret);
++						if (RET_WAS_ERROR(ret)) {
++							fprintf(stdout, "Warn: dsc reload got error:%d, skip\n", ret);
++							reloadstatus = false;
++							break;
++						} else {
++							files_add_checksums(filekeys->values[j], cs);
++							checksums_free(pkg->new_origfiles.checksums[j]);
++							pkg->new_origfiles.checksums[j] = checksums_dup(cs);
++						}
++						checksums_free(cs);
++					}
++					if (reloadstatus) {
++						//fprintf(stdout, "dsc reload success!\n");
++						r = RET_OK;
++					}
++				}
++			}
+ 			if (! RET_WAS_ERROR(r)) {
+ 
+ 				r = upgrade->target->completechecksums(
