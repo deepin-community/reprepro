@@ -1,3 +1,9 @@
+reprepro (5.4.2-1deepin3) unstable; urgency=medium
+
+  * chore: Change sha512 implement
+
+ -- hudeng <hudeng@deepin.org>  Tue, 17 Dec 2024 11:37:10 +0800
+
 reprepro (5.4.2-1deepin2) unstable; urgency=medium
 
   [ hudeng ]
