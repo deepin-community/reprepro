@@ -1,3 +1,10 @@
+reprepro (5.4.2-1deepin4) unstable; urgency=medium
+
+  * When using the -b parameter, you should use the absolute path to create
+    dscreload.
+
+ -- lichenggang <lichenggang@deepin.org>  Sun, 07 Sep 2025 15:29:14 +0800
+
 reprepro (5.4.2-1deepin3) unstable; urgency=medium
 
   * chore: Change sha512 implement

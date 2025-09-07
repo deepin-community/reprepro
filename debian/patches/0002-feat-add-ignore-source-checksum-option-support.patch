@@ -77,16 +77,18 @@ index be82173..a337b41 100644
  
  struct package_data {
  	struct package_data *next;
-@@ -679,6 +682,58 @@ retvalue upgradelist_install(struct upgradelist *upgrade, struct logger *logger,
+@@ -679,6 +682,82 @@ retvalue upgradelist_install(struct upgr
  
  			r = files_checkorimprove(&pkg->new_filekeys,
  					pkg->new_origfiles.checksums);
 +			// reload dsc files
 +			if (getenv("IGNORECHECKSUM")!=NULL && r == RET_ERROR_WRONG_MD5 && pkg->architecture == architecture_source) {
 +				struct strlist *filekeys = &pkg->new_filekeys;
-+				char *tmp_basedir = mprintf("./dscreload/%s", pkg->name);
++				char *tmp_basedir = mprintf("%s/dscreload/%s", global.basedir, pkg->name);	
 +				dirs_make_recursive(tmp_basedir);
 +				char *dscname = NULL;
++				char *cmdstr  = NULL;
++				char *current_dir_str = NULL;	
 +				for (int i = 0; i < filekeys->count; i++) {
 +					char *fullfilename, filename, tmpfile;
 +					fullfilename = files_calcfullfilename(filekeys->values[i]);
@@ -97,9 +99,31 @@ index be82173..a337b41 100644
 +						break;
 +					}
 +				}
-+
-+				char *cmdstr = mprintf("cd %s;dpkg-source -x --skip-patches --no-check ../../%s;find . -maxdepth 1 -type d ! -path . |xargs dpkg-source -b;cd -",
++				// 正确使用popen获取当前目录
++				FILE *fp = popen("pwd", "r");
++				if (fp != NULL) {
++					char buffer[1024];
++					if (fgets(buffer, sizeof(buffer), fp) != NULL) {
++						// 移除换行符
++						size_t len = strlen(buffer);
++						if (len > 0 && buffer[len-1] == '\n') {
++							buffer[len-1] = '\0';
++						}
++						current_dir_str = strdup(buffer);
++					}
++					pclose(fp);  // 使用pclose关闭
++				}
++				char *clean_dscname = dscname;
++				if (dscname != NULL && strncmp(dscname, "./", 2) == 0) {
++					clean_dscname = dscname + 2;  // 跳过"./"
++				}				
++				if (strchr(global.basedir, '/') != NULL) {
++					cmdstr = mprintf("cd %s;dpkg-source -x --skip-patches --no-check %s;find . -maxdepth 1 -type d ! -path . |xargs dpkg-source -b;cd -",
 +										tmp_basedir, dscname);
++				} else {
++					cmdstr = mprintf("cd %s;dpkg-source -x --skip-patches --no-check %s/%s;find . -maxdepth 1 -type d ! -path . |xargs dpkg-source -b;cd -",
++										tmp_basedir,current_dir_str, clean_dscname);
++				}
 +
 +				//fprintf(stdout, "vars: %s %s %s\n", dscname, tmp_basedir, cmdstr);
 +				if (dscname != NULL) {
