@@ -1,3 +1,9 @@
+reprepro (5.4.2-1deepin5) unstable; urgency=medium
+
+  * fix: import source file checksum error
+
+ -- hudeng <hudeng@deepin.org>  Thu, 27 Nov 2025 21:31:22 +0800
+
 reprepro (5.4.2-1deepin4) unstable; urgency=medium
 
   * When using the -b parameter, you should use the absolute path to create

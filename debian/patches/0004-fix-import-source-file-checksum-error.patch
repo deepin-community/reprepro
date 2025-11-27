@@ -1,0 +1,48 @@
+From c19f061dbcca3c0b1c92fea820620c3ecb991828 Mon Sep 17 00:00:00 2001
+From: hudeng <hudeng@deepin.org>
+Date: Thu, 27 Nov 2025 21:29:34 +0800
+Subject: [PATCH] fix: import source file checksum error
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+导入仓库的Packages文件中包含的checksum数据不一定准确,直接重新计算一下保证准确性
+---
+ downloadcache.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/downloadcache.c b/downloadcache.c
+index 720cbb8..b151958 100644
+--- a/downloadcache.c
++++ b/downloadcache.c
+@@ -129,13 +129,23 @@ static retvalue downloaditem_callback(enum queue_action action, void *privdata,
+ 		// only source file can ignore checksums
+ 		size_t l = strlen(gotfilename);
+ 		if (getenv("IGNORECHECKSUM")!=NULL && l > 4 && strcmp(gotfilename+l-3, "deb") != 0) {
+-			// modify check
++			// modify check: recalculate checksums from actual file to ensure correctness
+ 			fprintf(stdout, "Skip wrong checksum during receive source file of '%s', %s, %s:\n",
+ 					uri, gotfilename, wantedfilename);
+ 			checksums_printdifferences(stdout, d->checksums, checksums);
+-			// update file real checksums
+-			checksums_free(d->checksums);
+-			d->checksums = checksums_dup(checksums);
++
++			// Instead of using the potentially incorrect checksums from the .dsc file,
++			// recalculate checksums from the actual file to ensure correctness
++			struct checksums *actual_checksums = NULL;
++			retvalue ret = checksums_read(wantedfilename, &actual_checksums);
++			if (RET_IS_OK(ret)) {
++				// update file real checksums
++				checksums_free(d->checksums);
++				d->checksums = actual_checksums;
++				fprintf(stdout, "Using recalculated checksums for file: %s\n", wantedfilename);
++			} else {
++				fprintf(stderr, "Failed to recalculate checksums for file: %s\n", wantedfilename);
++			}
+ 		} else {
+ 			fprintf(stderr, "Wrong checksum during receive of '%s':\n",
+ 					uri);
+-- 
+2.50.1
+
