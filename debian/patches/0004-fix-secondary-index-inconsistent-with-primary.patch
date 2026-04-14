@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 14 Apr 2026 20:00:00 +0800
+Subject: [PATCH] fix: secondary index inconsistent with primary
+
+When database_openpackages is called and packages.db exists but
+packagenames.db does not, database_table_secondary with DB_CREATE
+would create an empty secondary index. This skips the legacy
+translation, leaving the secondary index inconsistent with the
+primary database. As a result, dists/ index files may not reflect
+all packages after an update.
+
+Fix by checking for this condition before opening the tables and
+running database_translate_legacy_packages first.
+
+See Debian bug #1095493.
+
+---
+ database.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+Index: reprepro/database.c
+===================================================================
+--- reprepro.orig/database.c
++++ reprepro/database.c
+@@ -2190,6 +2190,25 @@ retvalue database_openpackages(const cha
+ 		return RET_ERROR;
+ 	}
+
++	/* If the packages database exists but the secondary index does not,
++	 * we need to translate the legacy format first. Doing this before
++	 * database_table_secondary avoids creating an empty secondary index
++	 * that would be inconsistent with the primary database.
++	 * (See Debian bug #1095493) */
++	if (!readonly) {
++		char *packages_filename = dbfilename("packages.db");
++		char *packagenames_filename = dbfilename("packagenames.db");
++		bool needs_migration = isregularfile(packages_filename) &&
++				!isregularfile(packagenames_filename);
++		free(packages_filename);
++		free(packagenames_filename);
++		if (needs_migration) {
++			r = database_translate_legacy_packages();
++			if (RET_WAS_ERROR(r))
++				return r;
++		}
++	}
++
+ 	r = database_table_secondary("packages.db", identifier,
+ 			dbt_BTREE, readonly?DB_RDONLY:DB_CREATE,
+ 			"packagenames.db", dbt_BTREEVERSIONS, &table);

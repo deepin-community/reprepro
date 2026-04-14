@@ -1,3 +1,10 @@
+reprepro (5.4.2-1deepin5) unstable; urgency=medium
+
+  * fix: secondary index inconsistent with primary database causing
+    dists/ index files not updated after update. (Closes: #1095493)
+
+ -- lichenggang <lichenggang@deepin.org>  Tue, 14 Apr 2026 20:00:00 +0800
+
 reprepro (5.4.2-1deepin4) unstable; urgency=medium
 
   * When using the -b parameter, you should use the absolute path to create
