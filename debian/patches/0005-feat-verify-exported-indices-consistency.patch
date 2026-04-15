@@ -1,0 +1,175 @@
+diff --git a/distribution.c b/distribution.c
+index 8b24365..c6c0c87 100644
+--- a/distribution.c
++++ b/distribution.c
+@@ -40,6 +40,8 @@
+ #include "configparser.h"
+ #include "byhandhook.h"
+ #include "package.h"
++#include "indexfile.h"
++#include "filecntl.h"
+ #include "distribution.h"
+ 
+ static retvalue distribution_free(struct distribution *distribution) {
+@@ -1074,6 +1076,111 @@ retvalue distribution_exportlist(enum exportwhen when, struct distribution *dist
+ 	return result;
+ }
+ 
++retvalue distribution_verify_exported_indices(struct distribution *distributions) {
++	struct distribution *d;
++	retvalue result = RET_OK;
++
++	for (d = distributions ; d != NULL ; d = d->next) {
++		struct target *t;
++
++		if (d->omitted || !d->selected || !d->lookedat ||
++				d->exportoptions[deo_noexport])
++			continue;
++
++		for (t = d->targets ; t != NULL ; t = t->next) {
++			struct package_cursor cursor;
++			struct indexfile *idx = NULL;
++			struct package pkg;
++			char *basepath = NULL, *filepath = NULL, *indexpath = NULL;
++			size_t db_count = 0, idx_count = 0;
++			retvalue r;
++			enum compression comp = c_none;
++
++			if (t->noexport)
++				continue;
++
++			r = package_openiterator(t, READONLY, true, &cursor);
++			if (RET_WAS_ERROR(r)) {
++				RET_UPDATE(result, r);
++				continue;
++			}
++			while (package_next(&cursor))
++				db_count++;
++			r = package_closeiterator(&cursor);
++			if (RET_WAS_ERROR(r)) {
++				RET_UPDATE(result, r);
++				continue;
++			}
++
++			basepath = calc_dirconcat(global.distdir, d->codename);
++			filepath = calc_dirconcat(basepath, t->relativedirectory);
++			free(basepath);
++			basepath = calc_dirconcat(filepath, t->exportmode->filename);
++			free(filepath);
++
++			if (isregularfile(basepath)) {
++				indexpath = basepath;
++				basepath = NULL;
++				comp = c_none;
++			} else {
++				indexpath = mprintf("%s.gz", basepath);
++				if (!isregularfile(indexpath)) {
++					if (db_count > 0) {
++						fprintf(stderr,
++"Error: exported index file for %s not found (expected %s or %s.gz)!\n",
++								t->identifier, basepath, basepath);
++						RET_UPDATE(result, RET_ERROR_MISSING);
++					}
++					free(indexpath);
++					free(basepath);
++					continue;
++				}
++				comp = c_gzip;
++				free(basepath);
++				basepath = NULL;
++			}
++
++			r = indexfile_open(&idx, indexpath, comp);
++			if (RET_WAS_ERROR(r)) {
++				fprintf(stderr,
++"Error: cannot open exported index file %s for %s!\n",
++						indexpath, t->identifier);
++				RET_UPDATE(result, r);
++				goto target_done;
++			}
++
++			memset(&pkg, 0, sizeof(pkg));
++			while (indexfile_getnext(idx, &pkg, t, true)) {
++				idx_count++;
++				package_done(&pkg);
++			}
++			package_done(&pkg);
++
++			r = indexfile_close(idx);
++			idx = NULL;
++			if (RET_WAS_ERROR(r)) {
++				fprintf(stderr,
++"Error: cannot close exported index file %s for %s!\n",
++						indexpath, t->identifier);
++				RET_UPDATE(result, r);
++				goto target_done;
++			}
++
++			if (db_count != idx_count) {
++				fprintf(stderr,
++"Fatal error: exported index %s package count mismatch: database has %zu, index has %zu!\n",
++						t->identifier, db_count, idx_count);
++				RET_UPDATE(result, RET_ERROR);
++			}
++
++target_done:
++			free(indexpath);
++			free(basepath);
++		}
++	}
++
++	return result;
++}
+ 
+ /* get a pointer to the apropiate part of the linked list */
+ struct distribution *distribution_find(struct distribution *distributions, const char *name) {
+diff --git a/distribution.h b/distribution.h
+index 1078084..9123764 100644
+--- a/distribution.h
++++ b/distribution.h
+@@ -153,6 +153,7 @@ struct distribution *distribution_find(struct distribution *, const char *);
+ retvalue distribution_freelist(/*@only@*/struct distribution *distributions);
+ enum exportwhen {EXPORT_NEVER, EXPORT_SILENT_NEVER, EXPORT_CHANGED, EXPORT_NORMAL, EXPORT_FORCE };
+ retvalue distribution_exportlist(enum exportwhen when, /*@only@*/struct distribution *);
++retvalue distribution_verify_exported_indices(struct distribution *distributions);
+ 
+ retvalue distribution_loadalloverrides(struct distribution *);
+ void distribution_unloadoverrides(struct distribution *distribution);
+diff --git a/main.c b/main.c
+index ad3f61a..c8570b8 100644
+--- a/main.c
++++ b/main.c
+@@ -4266,6 +4266,16 @@ static retvalue callaction(command_t command, const struct action *action, int a
+ 		if (!RET_WAS_ERROR(result)) {
+ 			r = distribution_exportlist(export, alldistributions);
+ 			RET_ENDUPDATE(result, r);
++			/* verify exported index files match database
++			 * to catch inconsistencies caused by partial exports
++			 * or secondary index corruption (e.g. bug #1095493) */
++			if (!RET_WAS_ERROR(result) &&
++				    export != EXPORT_NEVER &&
++				    export != EXPORT_SILENT_NEVER) {
++				r = distribution_verify_exported_indices(
++						alldistributions);
++				RET_ENDUPDATE(result, r);
++			}
+ 		}
+ 
+ 		r = distribution_freelist(alldistributions);
+@@ -4402,6 +4412,16 @@ static retvalue callaction(command_t command, const struct action *action, int a
+ 					r = distribution_exportlist(export,
+ 							alldistributions);
+ 					RET_ENDUPDATE(result, r);
++					/* verify exported index files match database
++					 * to catch inconsistencies caused by partial exports
++					 * or secondary index corruption (e.g. bug #1095493) */
++					if (!RET_WAS_ERROR(result) &&
++						    export != EXPORT_NEVER &&
++						    export != EXPORT_SILENT_NEVER) {
++						r = distribution_verify_exported_indices(
++								alldistributions);
++						RET_ENDUPDATE(result, r);
++					}
+ 				}
+ 
+ 				/* delete files losing references, or

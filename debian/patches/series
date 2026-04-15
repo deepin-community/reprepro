@@ -2,3 +2,4 @@
 0002-feat-add-ignore-source-checksum-option-support.patch
 0003-chore-Change-sha512-implement.patch
 0004-fix-import-source-file-checksum-error.patch
+0005-feat-verify-exported-indices-consistency.patch
