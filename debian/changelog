@@ -1,3 +1,9 @@
+reprepro (5.4.2-1deepin6) unstable; urgency=medium
+
+  * feat: verify exported indices consistency after update/pull
+
+ -- lichenggang <lichenggang@deepin.org>  Tue, 14 Apr 2026 10:00:00 +0800
+
 reprepro (5.4.2-1deepin5) unstable; urgency=medium
 
   * fix: import source file checksum error
