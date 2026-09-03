@@ -1,0 +1,132 @@
+Description: Regenerate Checksums-Sha512 field for source packages
+ reprepro recomputed Files/Checksums-Sha1/Checksums-Sha256 when writing a
+ source package chunk but left the Checksums-Sha512 field from the original
+ .dsc untouched. When the underlying files' sizes changed, the stale sha512
+ lines contradicted the freshly computed sizes, producing:
+   WARNING: sha512 checksum line ... contradicts previous filesize!
+ during 'reprepro check'. Also emit the sha512 file list and regenerate the
+ Checksums-Sha512 field so all four checksum fields stay consistent.
+Author: lichenggang <lichenggang@uniontech.com>
+
+diff --git a/checksums.c b/checksums.c
+index b3edbd2..da775bc 100644
+--- a/checksums.c
++++ b/checksums.c
+@@ -814,7 +814,7 @@ retvalue checksumsarray_parse(struct checksumsarray *out, const struct strlist l
+ 	return RET_OK;
+ }
+ 
+-retvalue checksumsarray_genfilelist(const struct checksumsarray *a, char **md5_p, char **sha1_p, char **sha256_p) {
++retvalue checksumsarray_genfilelist(const struct checksumsarray *a, char **md5_p, char **sha1_p, char **sha256_p, char **sha512_p) {
+ 	size_t lens[cs_hashCOUNT];
+ 	bool missing[cs_hashCOUNT];
+ 	char *filelines[cs_hashCOUNT];
+@@ -889,6 +889,7 @@ retvalue checksumsarray_genfilelist(const struct checksumsarray *a, char **md5_p
+ 	*md5_p = filelines[cs_md5sum];
+ 	*sha1_p = filelines[cs_sha1sum];
+ 	*sha256_p = filelines[cs_sha256sum];
++	*sha512_p = filelines[cs_sha512sum];
+ 	return RET_OK;
+ }
+ 
+diff --git a/checksums.h b/checksums.h
+index 8c5da9b..16fdc5c 100644
+--- a/checksums.h
++++ b/checksums.h
+@@ -108,7 +108,7 @@ struct checksumsarray {
+ void checksumsarray_move(/*@out@*/struct checksumsarray *, /*@special@*/struct checksumsarray *array)/*@requires maxSet(array->names.values) >= array->names.count /\ maxSet(array->checksums) >= array->names.count @*/ /*@releases array->checksums, array->names.values @*/;
+ void checksumsarray_done(/*@special@*/struct checksumsarray *array) /*@requires maxSet(array->names.values) >= array->names.count /\ maxSet(array->checksums) >= array->names.count @*/ /*@releases array->checksums, array->names.values @*/;
+ retvalue checksumsarray_parse(/*@out@*/struct checksumsarray *, const struct strlist [cs_hashCOUNT], const char * /*filenametoshow*/);
+-retvalue checksumsarray_genfilelist(const struct checksumsarray *, /*@out@*/char **, /*@out@*/char **, /*@out@*/char **);
++retvalue checksumsarray_genfilelist(const struct checksumsarray *, /*@out@*/char **, /*@out@*/char **, /*@out@*/char **, /*@out@*/char **);
+ retvalue checksumsarray_include(struct checksumsarray *, /*@only@*/char *, const struct checksums *);
+ void checksumsarray_resetunsupported(const struct checksumsarray *, bool[cs_hashCOUNT]);
+ 
+diff --git a/sources.c b/sources.c
+index 1e7efcb..782c225 100644
+--- a/sources.c
++++ b/sources.c
+@@ -572,7 +572,7 @@ retvalue sources_complete(const struct dsc_headers *dsc, const char *directory,
+ 	retvalue r;
+ 	struct fieldtoadd *replace;
+ 	char *newchunk, *newchunk2;
+-	char *newfilelines, *newsha1lines, *newsha256lines;
++	char *newfilelines, *newsha1lines, *newsha256lines, *newsha512lines;
+ 
+ 	assert(section != NULL && priority != NULL);
+ 
+@@ -581,13 +581,16 @@ retvalue sources_complete(const struct dsc_headers *dsc, const char *directory,
+ 		return RET_ERROR_OOM;
+ 
+ 	r = checksumsarray_genfilelist(&dsc->files,
+-			&newfilelines, &newsha1lines, &newsha256lines);
++			&newfilelines, &newsha1lines, &newsha256lines,
++			&newsha512lines);
+ 	if (RET_WAS_ERROR(r)) {
+ 		free(newchunk2);
+ 		return r;
+ 	}
+ 	assert (newfilelines != NULL);
+-	replace = aodfield_new("Checksums-Sha256", newsha256lines, NULL);
++	replace = aodfield_new("Checksums-Sha512", newsha512lines, NULL);
++	if (!FAILEDTOALLOC(replace))
++		replace = aodfield_new("Checksums-Sha256", newsha256lines, replace);
+ 	if (!FAILEDTOALLOC(replace))
+ 		replace = aodfield_new("Checksums-Sha1", newsha1lines, replace);
+ 	if (!FAILEDTOALLOC(replace))
+@@ -605,6 +608,7 @@ retvalue sources_complete(const struct dsc_headers *dsc, const char *directory,
+ 	if (!FAILEDTOALLOC(replace))
+ 		replace = override_addreplacefields(override, replace);
+ 	if (FAILEDTOALLOC(replace)) {
++		free(newsha512lines);
+ 		free(newsha256lines);
+ 		free(newsha1lines);
+ 		free(newfilelines);
+@@ -613,6 +617,7 @@ retvalue sources_complete(const struct dsc_headers *dsc, const char *directory,
+ 	}
+ 
+ 	newchunk  = chunk_replacefields(newchunk2, replace, "Files", true);
++	free(newsha512lines);
+ 	free(newsha256lines);
+ 	free(newsha1lines);
+ 	free(newfilelines);
+@@ -631,7 +636,7 @@ retvalue sources_complete(const struct dsc_headers *dsc, const char *directory,
+ retvalue sources_complete_checksums(const char *chunk, const struct strlist *filekeys, struct checksums **c, char **out) {
+ 	struct fieldtoadd *replace;
+ 	char *newchunk;
+-	char *newfilelines, *newsha1lines, *newsha256lines;
++	char *newfilelines, *newsha1lines, *newsha256lines, *newsha512lines;
+ 	struct checksumsarray checksums;
+ 	retvalue r;
+ 	int i;
+@@ -648,23 +653,28 @@ retvalue sources_complete_checksums(const char *chunk, const struct strlist *fil
+ 	}
+ 
+ 	r = checksumsarray_genfilelist(&checksums,
+-			&newfilelines, &newsha1lines, &newsha256lines);
++			&newfilelines, &newsha1lines, &newsha256lines,
++			&newsha512lines);
+ 	free(checksums.names.values);
+ 	if (RET_WAS_ERROR(r))
+ 		return r;
+ 	assert (newfilelines != NULL);
+-	replace = aodfield_new("Checksums-Sha256", newsha256lines, NULL);
++	replace = aodfield_new("Checksums-Sha512", newsha512lines, NULL);
++	if (!FAILEDTOALLOC(replace))
++		replace = aodfield_new("Checksums-Sha256", newsha256lines, replace);
+ 	if (!FAILEDTOALLOC(replace))
+ 		replace = aodfield_new("Checksums-Sha1", newsha1lines, replace);
+ 	if (!FAILEDTOALLOC(replace))
+ 		replace = addfield_new("Files", newfilelines, replace);
+ 	if (FAILEDTOALLOC(replace)) {
++		free(newsha512lines);
+ 		free(newsha256lines);
+ 		free(newsha1lines);
+ 		free(newfilelines);
+ 		return RET_ERROR_OOM;
+ 	}
+ 	newchunk = chunk_replacefields(chunk, replace, "Files", true);
++	free(newsha512lines);
+ 	free(newsha256lines);
+ 	free(newsha1lines);
+ 	free(newfilelines);

@@ -1,3 +1,14 @@
+reprepro (5.4.2-1deepin7) unstable; urgency=medium
+
+  * fix: regenerate Checksums-Sha512 field for source packages
+    - checksumsarray_genfilelist now also emits the sha512 file list
+    - sources_complete/sources_complete_checksums regenerate the
+      Checksums-Sha512 field from freshly computed checksums
+    - avoids "WARNING: sha512 checksum line ... contradicts previous
+      filesize" during 'reprepro check'
+
+ -- lichenggang <lichenggang@uniontech.com>  Thu, 03 Sep 2026 15:16:09 +0800
+
 reprepro (5.4.2-1deepin6) unstable; urgency=medium
 
   * feat: verify exported indices consistency after update/pull
