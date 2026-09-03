@@ -4,4 +4,3 @@
 0004-fix-import-source-file-checksum-error.patch
 0005-feat-verify-exported-indices-consistency.patch
 0006-fix-regenerate-sha512-checksum.patch
-0007-fix-tolerate-stale-sha512-filesize.patch
