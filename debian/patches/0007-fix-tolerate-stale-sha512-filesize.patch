@@ -1,0 +1,28 @@
+Index: reprepro/checksums.c
+===================================================================
+--- reprepro.orig/checksums.c
++++ reprepro/checksums.c
+@@ -752,10 +752,20 @@ retvalue checksumsarray_parse(struct che
+ 						      != size_len
+ 						  || memcmp(hashes[cs_length].start,
+ 						       size_start, size_len) != 0)) {
+-						fprintf(stderr,
++						/* The Checksums-Sha512 field in source
++						 * chunks is often stale: many upstream
++						 * repositories record a filesize that
++						 * no longer matches the md5/sha1/sha256
++						 * entries. The sha512 line is dropped
++						 * below and the checksums are recomputed
++						 * from the actual files during import, so
++						 * do not emit a warning for sha512. */
++						if (cs != cs_sha512sum) {
++							fprintf(stderr,
+ "WARNING: %s checksum line ' %s' in '%s' contradicts previous filesize!\n",
+-							hash_name[cs], line,
+-							filenametoshow);
++								hash_name[cs], line,
++								filenametoshow);
++						}
+ 						continue;
+ 					}
+ 				}
